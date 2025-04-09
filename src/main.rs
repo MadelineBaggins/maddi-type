@@ -1,13 +1,9 @@
 use std::io;
 
-use color_eyre::owo_colors::OwoColorize;
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
-    crossterm::{
-        cursor::MoveDown,
-        event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    },
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout as TuiLayout, Rect},
     style::{Color, Style, Stylize},
     symbols::border,
@@ -490,7 +486,7 @@ impl Layout {
         // Check the shifted base layer
         for (row_i, row) in self.base.iter().enumerate() {
             for (col_i, c_candidate) in row.iter().enumerate() {
-                if c_candidate.to_ascii_uppercase() == c {
+                if Layout::shift(*c_candidate) == c {
                     return Some(Location {
                         row: row_i as u8,
                         col: col_i as u8,
