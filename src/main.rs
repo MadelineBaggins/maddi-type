@@ -1,9 +1,13 @@
 use std::io;
 
+use color_eyre::owo_colors::OwoColorize;
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
-    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    crossterm::{
+        cursor::MoveDown,
+        event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    },
     layout::{Constraint, Layout as TuiLayout, Rect},
     style::{Color, Style, Stylize},
     symbols::border,
@@ -85,6 +89,9 @@ pub struct Keyboard {
     layout: &'static Layout,
     keys: Vec<Vec<Key>>,
     draw: bool,
+    sym: Key,
+    cur: Key,
+    shift: Key,
 }
 
 impl Default for Keyboard {
@@ -127,6 +134,18 @@ impl Keyboard {
             keys,
             layout,
             draw: true,
+            cur: Key {
+                theme: &THEME_KEY_BASE,
+                text: Line::from("cur".to_string().bold().white()).centered(),
+            },
+            sym: Key {
+                theme: &THEME_KEY_BASE,
+                text: Line::from("sym".to_string().bold().white()).centered(),
+            },
+            shift: Key {
+                theme: &THEME_KEY_BASE,
+                text: Line::from("shift".to_string().bold().white()).centered(),
+            },
         }
     }
     fn set_qwerty(&mut self) {
@@ -137,6 +156,30 @@ impl Keyboard {
     }
     fn set_3l(&mut self) {
         *self = Self::from_layout(&LAYOUT_3L)
+    }
+
+    fn update(&mut self, c: char) {
+        for key in self.keys.iter_mut().flatten() {
+            key.theme = &THEME_KEY_BASE;
+        }
+        for modifier in [&mut self.sym, &mut self.cur, &mut self.shift] {
+            modifier.theme = &THEME_KEY_BASE;
+        }
+        let Some(location) = self.layout.location(c) else {
+            return;
+        };
+        if let Some(row) = self.keys.get_mut(location.row as usize) {
+            if let Some(key) = row.get_mut(location.col as usize) {
+                key.theme = &THEME_KEY_HINT
+            }
+        }
+        match location.modifier {
+            Some(Modifier::Sym) => &mut self.sym,
+            Some(Modifier::Cur) => &mut self.cur,
+            Some(Modifier::Shift) => &mut self.shift,
+            None => return,
+        }
+        .theme = &THEME_KEY_HINT;
     }
 }
 
@@ -158,42 +201,64 @@ impl Widget for &Keyboard {
             .title(title.centered())
             .title_bottom(instructions.centered())
             .border_set(border::ROUNDED);
-        let area = block.inner(block_area);
+        let keyboard_area = block.inner(block_area);
         block.render(block_area, buf);
+
         // Get the vertical layout for the keyboard
         let rows_num = self.layout.base.len();
-        let mut row_height = area.height / rows_num as u16;
+        let mut row_height = keyboard_area.height / rows_num as u16;
         if row_height % 2 == 0 {
             row_height -= 1;
         }
-        let layout = {
+        let row_layout = {
             let mut constraints = vec![];
             constraints.push(Constraint::Fill(1));
             constraints.extend(std::iter::repeat_n(
                 Constraint::Length(row_height),
                 rows_num,
             ));
+            constraints.push(Constraint::Length(1));
             constraints.push(Constraint::Fill(1));
-            TuiLayout::vertical(constraints).split(area)
+            TuiLayout::vertical(constraints).split(keyboard_area)
         };
-        // Render the rows
-        let cols_max = self.layout.base.iter().map(|row| row.len()).max().unwrap();
-        let mut col_width = area.width / cols_max as u16;
+
+        // Get the horizontal layout
+        let cols_num = self.layout.base.iter().map(|row| row.len()).max().unwrap();
+        let mut col_width = keyboard_area.width / cols_num as u16;
         if col_width % 2 == 0 {
             col_width -= 1;
         }
-        for (row_area, row) in layout.iter().skip(1).take(rows_num).zip(&self.keys) {
-            let key_layout = {
-                let mut constraints = vec![];
-                constraints.push(Constraint::Fill(1));
-                constraints.extend(std::iter::repeat_n(Constraint::Length(col_width), cols_max));
-                constraints.push(Constraint::Fill(1));
-                TuiLayout::horizontal(constraints).split(*row_area)
-            };
-            for (key_area, key) in key_layout.iter().skip(1).take(cols_max).zip(row) {
+        let col_constraints = {
+            let mut constraints = vec![];
+            constraints.push(Constraint::Fill(1));
+            constraints.extend(std::iter::repeat_n(Constraint::Length(col_width), cols_num));
+            constraints.push(Constraint::Fill(1));
+            constraints
+        };
+
+        // Render the rows
+        let mut row_areas = row_layout.iter();
+        for (row_area, row) in (&mut row_areas).skip(1).zip(&self.keys).take(rows_num) {
+            let key_layout = { TuiLayout::horizontal(col_constraints.clone()).split(*row_area) };
+            for (key_area, key) in key_layout.iter().skip(1).zip(row).take(cols_num) {
                 key.render(*key_area, buf);
             }
         }
+        let modifier_row = row_areas.next().unwrap();
+        let cur_width = self.cur.text.width() + 2;
+        let sym_width = self.sym.text.width() + 2;
+        let shift_width = self.shift.text.width() + 2;
+        let [_, cur, sym, shift, _] = TuiLayout::horizontal([
+            Constraint::Fill(1),
+            Constraint::Max(cur_width as u16),
+            Constraint::Max(sym_width as u16),
+            Constraint::Max(shift_width as u16),
+            Constraint::Fill(1),
+        ])
+        .areas(*modifier_row);
+        self.cur.render(cur, buf);
+        self.sym.render(sym, buf);
+        self.shift.render(shift, buf);
     }
 }
 
@@ -215,7 +280,9 @@ impl App {
                 .replace("\n", "↩")
                 .replace("—", "-")
                 .replace("—", "-")
-                .replace("’", "'"),
+                .replace("’", "'")
+                .replace("“", "\"")
+                .replace("”", "\""),
             progress: 0,
             exit: false,
         }
@@ -229,14 +296,18 @@ impl App {
         Ok(())
     }
 
-    fn draw(&self, frame: &mut Frame) {
+    fn draw(&mut self, frame: &mut Frame) {
         if self.keyboard.draw {
             let vertical = TuiLayout::vertical([Constraint::Fill(2), Constraint::Fill(1)]);
             let [app, keyboard] = vertical.areas(frame.area());
+            // Update the highlighted block for the keyboard
+            if let Some(c) = self.next() {
+                self.keyboard.update(c);
+            }
             frame.render_widget(&self.keyboard, keyboard);
-            frame.render_widget(self, app);
+            frame.render_widget(&*self, app);
         } else {
-            frame.render_widget(self, frame.area());
+            frame.render_widget(&*self, frame.area());
         }
     }
 
@@ -281,6 +352,11 @@ impl App {
                     self.progress += 1;
                 }
             }
+            KeyEvent {
+                code: KeyCode::Tab, ..
+            } => {
+                self.progress += 1;
+            }
             _ => {}
         }
     }
@@ -311,7 +387,7 @@ impl Widget for &App {
         let postfix = story.take(postfix_len).collect::<String>();
         let counter_text = Text::from(vec![Line::from(vec![
             prefix.dark_gray(),
-            current.white().bold(),
+            current.white().underlined().bold(),
             postfix.gray(),
         ])]);
         let area = block.inner(block_area);
@@ -414,7 +490,7 @@ impl Layout {
         // Check the shifted base layer
         for (row_i, row) in self.base.iter().enumerate() {
             for (col_i, c_candidate) in row.iter().enumerate() {
-                if *c_candidate == c.to_ascii_uppercase() {
+                if c_candidate.to_ascii_uppercase() == c {
                     return Some(Location {
                         row: row_i as u8,
                         col: col_i as u8,
