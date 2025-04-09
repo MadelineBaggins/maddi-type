@@ -1,5 +1,8 @@
 use std::io;
 
+mod cli;
+
+use cli::FileData;
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
@@ -12,8 +15,9 @@ use ratatui::{
 };
 
 fn main() -> io::Result<()> {
+    let mut app = App::load();
     let mut terminal = ratatui::init();
-    let result = App::new(include_str!("hobbit-ch01.txt").into()).run(&mut terminal);
+    let result = app.run(&mut terminal);
     ratatui::restore();
     result
 }
@@ -260,26 +264,21 @@ impl Widget for &Keyboard {
 
 pub struct App {
     keyboard: Keyboard,
-    story: String,
-    progress: usize,
+    file_data: FileData,
     exit: bool,
 }
 
 impl App {
     pub fn next(&self) -> Option<char> {
-        self.story.chars().nth(self.progress)
+        self.file_data
+            .story
+            .chars()
+            .nth(self.file_data.progress.chars)
     }
-    pub fn new(story: String) -> Self {
+    pub fn load() -> Self {
         Self {
             keyboard: Keyboard::default(),
-            story: story
-                .replace("\n", "↩")
-                .replace("—", "-")
-                .replace("—", "-")
-                .replace("’", "'")
-                .replace("“", "\"")
-                .replace("”", "\""),
-            progress: 0,
+            file_data: FileData::load().unwrap(),
             exit: false,
         }
     }
@@ -289,6 +288,7 @@ impl App {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
         }
+        self.file_data.save().unwrap();
         Ok(())
     }
 
@@ -337,7 +337,7 @@ impl App {
                 ..
             } => {
                 if self.next() == Some(char) {
-                    self.progress += 1;
+                    self.file_data.progress.chars += 1;
                 }
             }
             KeyEvent {
@@ -345,13 +345,13 @@ impl App {
                 ..
             } => {
                 if self.next() == Some('↩') {
-                    self.progress += 1;
+                    self.file_data.progress.chars += 1;
                 }
             }
             KeyEvent {
                 code: KeyCode::Tab, ..
             } => {
-                self.progress += 1;
+                self.file_data.progress.chars += 1;
             }
             _ => {}
         }
@@ -373,10 +373,12 @@ impl Widget for &App {
             .border_set(border::ROUNDED);
         let buff_width = block_area.width as usize / 3;
         let mut story = self
+            .file_data
             .story
             .chars()
-            .skip(self.progress.saturating_sub(buff_width));
-        let prefix_len = self.progress - self.progress.saturating_sub(buff_width);
+            .skip(self.file_data.progress.chars.saturating_sub(buff_width));
+        let prefix_len = self.file_data.progress.chars
+            - self.file_data.progress.chars.saturating_sub(buff_width);
         let prefix = (&mut story).take(prefix_len).collect::<String>();
         let current = (&mut story).take(1).collect::<String>();
         let postfix_len = (2 * buff_width).saturating_sub(prefix_len);
