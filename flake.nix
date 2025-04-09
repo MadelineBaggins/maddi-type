@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: CC0-1.0
 
 {
-  description = "A rust binary flake on nightly.";
+  description = "A TUI program to practice typing";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -35,7 +35,7 @@
       };
     in with pkgs; {
       defaultPackage = stable-platform.buildRustPackage {
-        pname = "typing";
+        pname = "maddi-type";
         version = "0.1.0";
         src = ./.;
         cargoLock = {
