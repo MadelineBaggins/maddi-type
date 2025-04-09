@@ -85,7 +85,7 @@ impl Widget for &Key {
     }
 }
 
-pub struct Keyboard {
+struct Keyboard {
     layout: &'static Layout,
     keys: Vec<Vec<Key>>,
     draw: bool,
@@ -262,28 +262,64 @@ impl Widget for &Keyboard {
     }
 }
 
-pub struct App {
+struct Error {
+    char: char,
+    position: usize,
+}
+
+struct App {
     keyboard: Keyboard,
     file_data: FileData,
+    errors: Vec<Error>,
     exit: bool,
 }
 
 impl App {
-    pub fn next(&self) -> Option<char> {
+    fn position(&self) -> usize {
+        self.file_data.progress.chars
+    }
+    fn position_mut(&mut self) -> &mut usize {
+        &mut self.file_data.progress.chars
+    }
+    fn next(&self) -> Option<char> {
         self.file_data
             .story
             .chars()
             .nth(self.file_data.progress.chars)
     }
-    pub fn load() -> Self {
+    fn advance(&mut self) {
+        if self.next().is_none() {
+            return;
+        }
+        *self.position_mut() += 1
+    }
+    fn advance_with(&mut self, c: char) {
+        if self.next().is_none() {
+            return;
+        }
+        if self.next() != Some(c) {
+            self.errors.push(Error {
+                char: c,
+                position: self.position(),
+            })
+        }
+        self.advance();
+    }
+    fn backspace(&mut self) {
+        *self.position_mut() = self.position().saturating_sub(1);
+        let position = self.position();
+        self.errors.retain(|e| e.position != position);
+    }
+    fn load() -> Self {
         Self {
             keyboard: Keyboard::default(),
             file_data: FileData::load().unwrap(),
+            errors: vec![],
             exit: false,
         }
     }
 
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
@@ -336,22 +372,24 @@ impl App {
                 code: KeyCode::Char(char),
                 ..
             } => {
-                if self.next() == Some(char) {
-                    self.file_data.progress.chars += 1;
-                }
+                self.advance_with(char);
             }
             KeyEvent {
                 code: KeyCode::Enter,
                 ..
             } => {
-                if self.next() == Some('↩') {
-                    self.file_data.progress.chars += 1;
-                }
+                self.advance_with('↩');
             }
             KeyEvent {
                 code: KeyCode::Tab, ..
             } => {
-                self.file_data.progress.chars += 1;
+                self.advance();
+            }
+            KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } => {
+                self.backspace();
             }
             _ => {}
         }
@@ -372,22 +410,32 @@ impl Widget for &App {
             .title_bottom(instructions.centered())
             .border_set(border::ROUNDED);
         let buff_width = block_area.width as usize / 3;
-        let mut story = self
+        let story = self
             .file_data
             .story
             .chars()
-            .skip(self.file_data.progress.chars.saturating_sub(buff_width));
-        let prefix_len = self.file_data.progress.chars
-            - self.file_data.progress.chars.saturating_sub(buff_width);
-        let prefix = (&mut story).take(prefix_len).collect::<String>();
-        let current = (&mut story).take(1).collect::<String>();
-        let postfix_len = (2 * buff_width).saturating_sub(prefix_len);
-        let postfix = story.take(postfix_len).collect::<String>();
-        let counter_text = Text::from(vec![Line::from(vec![
-            prefix.dark_gray(),
-            current.white().underlined().bold(),
-            postfix.gray(),
-        ])]);
+            .enumerate()
+            .map(|(i, c)| {
+                if i == self.position() {
+                    return c.to_string().white().bold().underlined();
+                }
+                if i > self.position() {
+                    return c.to_string().gray();
+                };
+                if i + buff_width >= self.position() {
+                    return self
+                        .errors
+                        .iter()
+                        .find(|e| e.position == i)
+                        .map(|e| e.char.to_string().red().underlined())
+                        .unwrap_or(c.to_string().dark_gray());
+                }
+                c.to_string().gray()
+            })
+            .skip(self.position().saturating_sub(buff_width));
+        let counter_text = Text::from(vec![Line::from(
+            story.take(2 * buff_width + 1).collect::<Vec<_>>(),
+        )]);
         let area = block.inner(block_area);
         block.render(block_area, buf);
         let [_, area, _] = TuiLayout::vertical([
