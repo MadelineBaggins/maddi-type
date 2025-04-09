@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 Madeline Baggins <declanbaggins@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::io::Write;

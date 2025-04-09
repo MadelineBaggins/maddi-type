@@ -1,7 +1,16 @@
+# SPDX-FileCopyrightText: 2025 Madeline Baggins <declanbaggins@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-only
+
 [package]
 name = "maddi-type"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-only"
+description = "A tui tool for typing practice"
+repository = "https://github.com/MadelineBaggins/maddi-type"
+readme = "README.md"
+keywords = [ "typing", "dvorak", "qwerty", "3l" ]
 
 [dependencies]
 clap = { version = "4.5.35", features = ["derive"] }
